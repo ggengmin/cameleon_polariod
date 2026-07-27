@@ -89,19 +89,19 @@
       user-select: none;
     }
 
-    /* 폴라로이드 하단 브랜드 문구 - 얇고 고급스럽게 */
+    /* 폴라로이드 하단 브랜드 문구 */
     .polaroid-caption {
       position: absolute;
-      bottom: 20px;
+      bottom: 18px;
       left: 0;
       width: 100%;
       text-align: center;
-      color: #2a2a2a;
-      font-size: 14px;
-      font-weight: 300;
-      letter-spacing: 5px;
-      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-      opacity: 0.75;
+      color: #222;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      font-family: 'Courier New', Courier, monospace, sans-serif;
+      opacity: 0.85;
     }
 
     /* 컨트롤 버튼 */
@@ -188,7 +188,7 @@
   <div class="result-modal" id="resultModal">
     <img id="resultImage" alt="Polaroid Result">
     <div class="btn-group">
-      <a id="downloadLink" class="btn btn-shoot" download="nuvy-polaroid.png">저장</a>
+      <a id="downloadLink" class="btn btn-shoot" download="nuvy-polaroid.jpg">저장</a>
       <button class="btn btn-switch" id="btnClose">다시 찍기</button>
     </div>
   </div>
@@ -269,47 +269,7 @@
       }, 1000);
     });
 
-    // 🎯 CSS filter: contrast(125%) saturate(65%) brightness(105%) sepia(5%) 를
-    // canvas의 ctx.filter에 의존하지 않고, 픽셀 단위로 직접 수식 계산해서 적용합니다.
-    // (모바일 Safari 등에서 ctx.filter가 CSS filter만큼 정확하게 지원되지 않아
-    //  라이브뷰와 저장본이 달라지는 문제의 원인이었습니다)
-    function applyLiveFilterMath(imageData) {
-      const d = imageData.data;
-
-      const CONTRAST = 1.25;
-      const contrastOffset = 127.5 * (1 - CONTRAST);
-
-      for (let i = 0; i < d.length; i += 4) {
-        let r = d[i], g = d[i + 1], b = d[i + 2];
-
-        // 1. contrast(125%)
-        r = r * CONTRAST + contrastOffset;
-        g = g * CONTRAST + contrastOffset;
-        b = b * CONTRAST + contrastOffset;
-
-        // 2. saturate(65%) - CSS 표준 채도 행렬
-        let sr = 0.72455 * r + 0.25025 * g + 0.0252 * b;
-        let sg = 0.07455 * r + 0.90025 * g + 0.0252 * b;
-        let sb = 0.07455 * r + 0.25025 * g + 0.6752 * b;
-        r = sr; g = sg; b = sb;
-
-        // 3. brightness(105%)
-        r *= 1.05; g *= 1.05; b *= 1.05;
-
-        // 4. sepia(5%) - identity와 세피아 행렬 5% 보간
-        let pr = 0.96965 * r + 0.03845 * g + 0.00945 * b;
-        let pg = 0.01745 * r + 0.9843 * g + 0.0084 * b;
-        let pb = 0.0136 * r + 0.0267 * g + 0.95655 * b;
-
-        d[i]     = pr < 0 ? 0 : pr > 255 ? 255 : pr;
-        d[i + 1] = pg < 0 ? 0 : pg > 255 ? 255 : pg;
-        d[i + 2] = pb < 0 ? 0 : pb > 255 ? 255 : pb;
-      }
-
-      return imageData;
-    }
-
-    // 📸 라이브 화면(비디오+CSS필터) 느낌을 그대로 재현하는 스냅샷 함수
+    // 📸 라이브 화면 그대로 캡처하는 스냅샷 함수
     function takeSnapshot() {
       const ctx = canvas.getContext('2d');
 
@@ -326,68 +286,42 @@
       ctx.fillStyle = '#faf9f6';
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-      // 2. 사진 영역 - 필터 없이 원본 프레임을 먼저 그림 (ctx.filter 사용 안 함)
+      // 2. 사진 영역
       ctx.save();
       ctx.beginPath();
       ctx.rect(borderWidth, borderWidth, photoSize, photoSize);
       ctx.clip();
 
-      const baseSize = Math.min(videoWidth, videoHeight);
-      const cropSize = baseSize / ZOOM_FACTOR;
-      const sourceX = (videoWidth - cropSize) / 2;
-      const sourceY = (videoHeight - cropSize) / 2;
+      // 라이브 비디오에 적용된 CSS 필터와 동일한 필터 1회만 적용
+      ctx.filter = 'contrast(125%) saturate(65%) brightness(105%) sepia(5%)';
 
+      let baseSize = Math.min(videoWidth, videoHeight);
+      let cropSize = baseSize / ZOOM_FACTOR;
+      let sourceX = (videoWidth - cropSize) / 2;
+      let sourceY = (videoHeight - cropSize) / 2;
+
+      // 카메라 뷰파인더 픽셀 그려넣기
       if (currentFacingMode === 'user') {
         ctx.translate(borderWidth + photoSize, borderWidth);
         ctx.scale(-1, 1);
         ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, 0, 0, photoSize, photoSize);
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
       } else {
         ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, borderWidth, borderWidth, photoSize, photoSize);
       }
-
-      // 3. 방금 그린 사진 영역의 픽셀을 읽어서 직접 필터 수식 적용 (라이브뷰와 동일한 결과)
-      const photoImageData = ctx.getImageData(borderWidth, borderWidth, photoSize, photoSize);
-      applyLiveFilterMath(photoImageData);
-      ctx.putImageData(photoImageData, borderWidth, borderWidth);
-
-      // 4. 라이브 화면의 flash-overlay(중앙 하이라이트 방사형 그라데이션) 동일 반영
-      const gradCenterX = borderWidth + photoSize * 0.5;
-      const gradCenterY = borderWidth + photoSize * 0.45;
-      const gradRadius = photoSize * 0.71;
-      const flashGrad = ctx.createRadialGradient(
-        gradCenterX, gradCenterY, 0,
-        gradCenterX, gradCenterY, gradRadius
-      );
-      flashGrad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
-      flashGrad.addColorStop(0.55, 'rgba(255, 255, 255, 0.1)');
-      flashGrad.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
-
-      ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = flashGrad;
-      ctx.fillRect(borderWidth, borderWidth, photoSize, photoSize);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
-
       ctx.restore();
 
-      // 5. 하단 중앙 브랜드 각인 (NUVY PHOTO) - 얇고 고급스러운 서체
-      ctx.fillStyle = '#2a2a2a';
-      ctx.font = '300 30px "Helvetica Neue", Helvetica, Arial, sans-serif';
+      // 3. 하단 중앙 브랜드 각인 (NUVY PHOTO)
+      ctx.fillStyle = '#222222';
+      ctx.font = '600 28px "Courier New", Courier, monospace, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      if ('letterSpacing' in ctx) {
-        ctx.letterSpacing = '8px';
-      }
       const textY = borderWidth + photoSize + (bottomBorderWidth / 2) - 5;
-      ctx.fillText('NUVY PHOTO', canvasWidth / 2 + ('letterSpacing' in ctx ? 20 : 0), textY);
+      ctx.fillText('NUVY PHOTO', canvasWidth / 2, textY);
 
-      // 6. 모달 표시 - PNG로 저장해서 JPEG 압축으로 인한 채도 손실을 방지
-      const dataUrl = canvas.toDataURL('image/png');
+      // 4. 모달 표시
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
       resultImage.src = dataUrl;
       downloadLink.href = dataUrl;
-      downloadLink.download = 'nuvy-polaroid.png';
       resultModal.style.display = 'flex';
     }
 
