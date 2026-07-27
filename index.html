@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>iPad Polaroid Cam</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #121212;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    h1 { font-size: 20px; margin-bottom: 15px; color: #eee; }
+
+    /* 폴라로이드 실시간 라이브 카메라는 화면 중앙 배치 */
+    .polaroid-card {
+      background: #f8f7f5;
+      padding: 16px 16px 55px 16px;
+      border-radius: 4px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+      width: 100%;
+      max-width: 380px;
+      position: relative;
+    }
+
+    .viewfinder {
+      position: relative;
+      width: 100%;
+      height: 380px;
+      background-color: #000;
+      overflow: hidden;
+      border-radius: 2px;
+    }
+
+    /* 카메라 실시간 스트림 */
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* 셀카 반전 */
+    }
+
+    /* 뽀얀 플래시 오버레이 (실시간 화면용) */
+    .flash-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+      background: radial-gradient(
+        circle at 50% 40%, 
+        rgba(255, 255, 255, 0.5) 0%, 
+        rgba(255, 255, 255, 0.15) 50%, 
+        transparent 90%
+      );
+      mix-blend-mode: screen;
+      opacity: 0.3; /* 뽀얀효과 30% */
+    }
+
+    /* 버튼 컨트롤 영역 */
+    .controls {
+      margin-top: 25px;
+      display: flex;
+      gap: 15px;
+    }
+
+    .btn {
+      padding: 14px 28px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-shoot {
+      background: #ff4757;
+      color: white;
+      box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+    }
+    .btn-shoot:active { transform: scale(0.95); }
+
+    .btn-switch {
+      background: #333;
+      color: #ddd;
+    }
+
+    /* 렌더링용 숨김 캔버스 */
+    canvas { display: none; }
+
+    /* 찍은 결과물 모달 popup */
+    .result-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      z-index: 100;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .result-modal img {
+      max-width: 90%;
+      max-height: 70vh;
+      border-radius: 4px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      margin-bottom: 20px;
+    }
+    .result-modal .btn-group {
+      display: flex;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>iPad Flash Polaroid Cam</h1>
+
+  <!-- 폴라로이드 실시간 뷰파인더 -->
+  <div class="polaroid-card">
+    <div class="viewfinder">
+      <video id="webcam" autoplay playsinline muted></video>
+      <div id="flashOverlay" class="flash-overlay"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-switch" id="btnSwitch">카메라 전환</button>
+    <button class="btn btn-shoot" id="btnShoot">📸 사진 촬영</button>
+  </div>
+
+  <!-- 숨겨진 오프스크린 캔버스 (합성/저장 전용) -->
+  <canvas id="saveCanvas"></canvas>
+
+  <!-- 촬영 후 저장 모달 -->
+  <div class="result-modal" id="resultModal">
+    <img id="resultImage" alt="Polaroid Result">
+    <div class="btn-group">
+      <a id="downloadLink" class="btn btn-shoot" download="polaroid-flash.jpg">사진 저장하기</a>
+      <button class="btn btn-switch" id="btnClose">다시 찍기</button>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const btnShoot = document.getElementById('btnShoot');
+    const btnSwitch = document.getElementById('btnSwitch');
+    const canvas = document.getElementById('saveCanvas');
+    const resultModal = document.getElementById('resultModal');
+    const resultImage = document.getElementById('resultImage');
+    const downloadLink = document.getElementById('downloadLink');
+    const btnClose = document.getElementById('btnClose');
+
+    let currentFacingMode = 'user'; // 'user' (전면 셀카) 또는 'environment' (후면)
+    let stream = null;
+
+    // 1. 요청하신 지정 필터 옵션값
+    const FILTER_CONFIG = {
+      contrast: 1.25,   // 명암대비 125%
+      saturate: 0.65,   // 채도 65%
+      brightness: 1.15, // 플래시 기본 밝기 보정 115%
+      bloomOpacity: 0.30 // 뽀얀 효과 30%
+    };
+
+    // 실시간 비디오 화면에 CSS 필터 적용
+    video.style.filter = `contrast(${FILTER_CONFIG.contrast * 100}%) saturate(${FILTER_CONFIG.saturate * 100}%) brightness(${FILTER_CONFIG.brightness * 100}%)`;
+
+    // 2. 아이패드 카메라 스트림 연결
+    async function startCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: currentFacingMode,
+            width: { ideal: 1080 },
+            height: { ideal: 1080 }
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        alert("카메라 권한을 허용해주세요: " + err.message);
+      }
+    }
+
+    // 전면/후면 카메라 전환
+    btnSwitch.addEventListener('click', () => {
+      currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+      video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
+      startCamera();
+    });
+
+    // 3. 📸 셔터 클릭시 캔버스에 폴라로이드 + 필터 + 뽀얀 글로우 렌더링
+    btnShoot.addEventListener('click', () => {
+      const ctx = canvas.getContext('2d');
+
+      // 고화질 폴라로이드 캔버스 크기 정의
+      const pWidth = 800;
+      const pHeight = 1000;
+      const border = 40;
+      const bottomBorder = 150;
+
+      canvas.width = pWidth;
+      canvas.height = pHeight;
+
+      // A. 폴라로이드 흰색 프레임 바탕
+      ctx.fillStyle = '#f8f7f5';
+      ctx.fillRect(0, 0, pWidth, pHeight);
+
+      // B. 사진 영역 계산
+      const photoX = border;
+      const photoY = border;
+      const photoW = pWidth - (border * 2);
+      const photoH = pHeight - border - bottomBorder;
+
+      ctx.save();
+      // 사진 영역으로 클리핑
+      ctx.beginPath();
+      ctx.rect(photoX, photoY, photoW, photoH);
+      ctx.clip();
+
+      // C. 캔버스 이미지 필터 적용 (명암대비 125%, 채도 65%)
+      ctx.filter = `contrast(${FILTER_CONFIG.contrast * 100}%) saturate(${FILTER_CONFIG.saturate * 100}%) brightness(${FILTER_CONFIG.brightness * 100}%)`;
+
+      // 셀카일 경우 좌우 반전 처리
+      if (currentFacingMode === 'user') {
+        ctx.translate(photoX + photoW, photoY);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, photoW, photoH);
+      } else {
+        ctx.drawImage(video, photoX, photoY, photoW, photoH);
+      }
+      ctx.restore();
+
+      // D. 뽀얀 효과 (Bloom 30%) 정면 플래시 Radial Gradient 합성
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(photoX, photoY, photoW, photoH);
+      ctx.clip();
+
+      const centerX = photoX + (photoW / 2);
+      const centerY = photoY + (photoH * 0.4);
+      const radius = Math.max(photoW, photoH) * 0.75;
+
+      const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+      grad.addColorStop(0, `rgba(255, 255, 255, ${FILTER_CONFIG.bloomOpacity * 1.5})`);
+      grad.addColorStop(0.5, `rgba(255, 250, 240, ${FILTER_CONFIG.bloomOpacity * 0.5})`);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      ctx.globalCompositeOperation = 'screen'; // 스크린 혼합 모드
+      ctx.fillStyle = grad;
+      ctx.fillRect(photoX, photoY, photoW, photoH);
+      ctx.restore();
+
+      // E. 완성이미지 추출 및 저장 팝업 표시
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      resultImage.src = dataUrl;
+      downloadLink.href = dataUrl;
+      resultModal.style.display = 'flex';
+    });
+
+    btnClose.addEventListener('click', () => {
+      resultModal.style.display = 'none';
+    });
+
+    // 앱 시작
+    startCamera();
+  </script>
+</body>
+</html>
