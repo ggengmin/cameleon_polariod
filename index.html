@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>NUBI PHOTO - Flash Polaroid Cam</title>
+  <title>NUVY PHOTO - Live Snapshot Cam</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -23,7 +23,7 @@
 
     /* 폴라로이드 카드 스타일 */
     .polaroid-card {
-      background: #faf9f6; /* 빈티지 폴라로이드 인화지 색상 */
+      background: #faf9f6;
       padding: 12px 12px 55px 12px;
       border-radius: 3px;
       box-shadow: 0 12px 30px rgba(0,0,0,0.6);
@@ -51,19 +51,17 @@
       object-fit: cover; 
     }
 
-    /* 1. 라이브 화면 필터 (전해주신 기존 기본 필터 기준) */
+    /* 실시간 라이브 필터 (마음에 드셨던 기준 수치) */
     video.filtered {
       filter: contrast(125%) saturate(65%) brightness(105%) sepia(5%);
-      /* 3. 카메라 확대 (1.25배 디지털 줌) */
       transform-origin: center center;
     }
 
-    /* 첨부 이미지 특유의 '정면 직광 플래시' 오버레이 레이어 */
+    /* 직광 플래시 오버레이 */
     .flash-overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
       pointer-events: none;
-      /* 중앙은 하얗게 밝고 테두리로 갈수록 자연스럽게 떨어지는 직광 플래시 */
       background: radial-gradient(
         circle at 50% 45%, 
         rgba(255, 255, 255, 0.45) 0%, 
@@ -75,7 +73,23 @@
       z-index: 2;
     }
 
-    /* 폴라로이드 하단 텍스트 프리뷰 */
+    /* 3-2-1 카운트다운 타이머 오버레이 */
+    .timer-overlay {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.2);
+      z-index: 10;
+      align-items: center;
+      justify-content: center;
+      font-size: 80px;
+      font-weight: 800;
+      color: #ffffff;
+      text-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      user-select: none;
+    }
+
+    /* 폴라로이드 하단 브랜드 문구 */
     .polaroid-caption {
       position: absolute;
       bottom: 18px;
@@ -84,10 +98,10 @@
       text-align: center;
       color: #222;
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 600;
       letter-spacing: 3px;
       font-family: 'Courier New', Courier, monospace, sans-serif;
-      opacity: 0.8;
+      opacity: 0.85;
     }
 
     /* 컨트롤 버튼 */
@@ -114,6 +128,7 @@
       box-shadow: 0 4px 10px rgba(255, 71, 87, 0.3);
     }
     .btn-shoot:active { transform: scale(0.96); }
+    .btn-shoot:disabled { background: #888; box-shadow: none; cursor: not-allowed; }
 
     .btn-switch {
       background: #333;
@@ -143,27 +158,28 @@
       gap: 10px;
     }
 
-    /* 합성용 캔버스 */
     canvas#saveCanvas { display: none; }
   </style>
 </head>
 <body>
 
-  <h1>NUBI PHOTO</h1>
+  <h1>NUVY PHOTO</h1>
 
   <!-- 폴라로이드 프리뷰 -->
   <div class="polaroid-card">
-    <div class="viewfinder">
+    <div class="viewfinder" id="viewfinder">
       <video id="webcam" autoplay playsinline muted class="filtered"></video>
       <div id="flashOverlay" class="flash-overlay"></div>
+      <!-- 타이머 표시 레이어 -->
+      <div id="timerOverlay" class="timer-overlay">3</div>
     </div>
-    <!-- 2. 폴라로이드 하단 브랜드 문구 -->
-    <div class="polaroid-caption">NUBI PHOTO</div>
+    <!-- 브랜드 문구 (NUVY PHOTO) -->
+    <div class="polaroid-caption">NUVY PHOTO</div>
   </div>
 
   <div class="controls">
     <button class="btn btn-switch" id="btnSwitch">카메라 전환</button>
-    <button class="btn btn-shoot" id="btnShoot">📸 촬영</button>
+    <button class="btn btn-shoot" id="btnShoot">📸 촬영 (3초)</button>
   </div>
 
   <canvas id="saveCanvas"></canvas>
@@ -172,7 +188,7 @@
   <div class="result-modal" id="resultModal">
     <img id="resultImage" alt="Polaroid Result">
     <div class="btn-group">
-      <a id="downloadLink" class="btn btn-shoot" download="nubi-polaroid.jpg">저장</a>
+      <a id="downloadLink" class="btn btn-shoot" download="nuvy-polaroid.jpg">저장</a>
       <button class="btn btn-switch" id="btnClose">다시 찍기</button>
     </div>
   </div>
@@ -181,6 +197,7 @@
     const video = document.getElementById('webcam');
     const btnShoot = document.getElementById('btnShoot');
     const btnSwitch = document.getElementById('btnSwitch');
+    const timerOverlay = document.getElementById('timerOverlay');
     const canvas = document.getElementById('saveCanvas');
     const resultModal = document.getElementById('resultModal');
     const resultImage = document.getElementById('resultImage');
@@ -192,7 +209,6 @@
     let videoWidth = 0;
     let videoHeight = 0;
 
-    // 3. 확대 비율 설정 (1.25 = 25% 확대)
     const ZOOM_FACTOR = 1.25;
 
     async function startCamera() {
@@ -217,12 +233,11 @@
           video.play();
         };
 
-        // 전면 카메라 시 반전 + 확대(scale) 함께 적용
         const flip = (currentFacingMode === 'user') ? -1 : 1;
         video.style.transform = `scaleX(${flip}) scale(${ZOOM_FACTOR})`;
 
       } catch (err) {
-        alert("카메라를 작동할 수 없습니다. HTTPS 환경인지 확인해 주세요.");
+        alert("카메라 권한을 확인할 수 없습니다. HTTPS 환경인지 확인해 주세요.");
       }
     }
 
@@ -231,38 +246,61 @@
       startCamera();
     });
 
-    // 📸 셔터 클릭시: 라이브 화면 100% 동일하게 캡처 + NUBI PHOTO 하단 프린팅
+    // ⏱️ 3-2-1 타이머 후 촬영 시작
     btnShoot.addEventListener('click', () => {
+      btnShoot.disabled = true;
+      btnSwitch.disabled = true;
+      timerOverlay.style.display = 'flex';
+
+      let count = 3;
+      timerOverlay.textContent = count;
+
+      const countdown = setInterval(() => {
+        count--;
+        if (count > 0) {
+          timerOverlay.textContent = count;
+        } else {
+          clearInterval(countdown);
+          timerOverlay.style.display = 'none';
+          takeSnapshot(); // 타이머 끝나면 바로 캡처!
+          btnShoot.disabled = false;
+          btnSwitch.disabled = false;
+        }
+      }, 1000);
+    });
+
+    // 📸 라이브 화면 그대로 캡처하는 스냅샷 함수
+    function takeSnapshot() {
       const ctx = canvas.getContext('2d');
 
       const photoSize = 1000;
       const borderWidth = 40;
-      const bottomBorderWidth = 160; // 문구가 들어갈 하단 여백 확장
+      const bottomBorderWidth = 160;
       const canvasWidth = photoSize + (borderWidth * 2);
       const canvasHeight = photoSize + borderWidth + bottomBorderWidth;
 
       canvas.width = canvasWidth;
       canvas.height = canvasHeight;
 
-      // 1. 프레임 바탕 (아이보리)
+      // 1. 폴라로이드 아이보리 바탕
       ctx.fillStyle = '#faf9f6';
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-      // 2. 사진 영역 클리핑
+      // 2. 사진 영역
       ctx.save();
       ctx.beginPath();
       ctx.rect(borderWidth, borderWidth, photoSize, photoSize);
       ctx.clip();
 
-      // [핵심 1] 라이브 화면과 100% 동일하게 그리기 위해 라이브 비디오 CSS 필터를 캔버스에 직접 복사
+      // 라이브 비디오에 적용된 CSS 필터와 동일한 필터 1회만 적용
       ctx.filter = 'contrast(125%) saturate(65%) brightness(105%) sepia(5%)';
 
-      // [핵심 3] 확대(ZOOM_FACTOR)가 적용된 중앙 자르기 범위 계산
       let baseSize = Math.min(videoWidth, videoHeight);
-      let cropSize = baseSize / ZOOM_FACTOR; // 확대된 만큼 원본에서 잘라내는 크기 축소
+      let cropSize = baseSize / ZOOM_FACTOR;
       let sourceX = (videoWidth - cropSize) / 2;
       let sourceY = (videoHeight - cropSize) / 2;
 
+      // 카메라 뷰파인더 픽셀 그려넣기
       if (currentFacingMode === 'user') {
         ctx.translate(borderWidth + photoSize, borderWidth);
         ctx.scale(-1, 1);
@@ -272,41 +310,20 @@
       }
       ctx.restore();
 
-      // [핵심 4] 라이브 화면의 직광 플래시 오버레이 레이어도 그대로 캔버스에 동일 합성
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(borderWidth, borderWidth, photoSize, photoSize);
-      ctx.clip();
-
-      const centerX = borderWidth + (photoSize / 2);
-      const centerY = borderWidth + (photoSize * 0.45);
-      const radius = photoSize * 0.65;
-
-      const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-      grad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
-      grad.addColorStop(0.55, 'rgba(255, 255, 255, 0.1)');
-      grad.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
-
-      ctx.globalCompositeOperation = 'screen';
-      ctx.fillStyle = grad;
-      ctx.fillRect(borderWidth, borderWidth, photoSize, photoSize);
-      ctx.restore();
-
-      // [핵심 2] 폴라로이드 하단 중앙에 NUBI PHOTO 문구 각인
+      // 3. 하단 중앙 브랜드 각인 (NUVY PHOTO)
       ctx.fillStyle = '#222222';
-      ctx.font = '500 28px "Courier New", Courier, monospace, sans-serif';
+      ctx.font = '600 28px "Courier New", Courier, monospace, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      // 하단 여백의 정확한 중앙 좌표에 인쇄
       const textY = borderWidth + photoSize + (bottomBorderWidth / 2) - 5;
-      ctx.fillText('NUBI PHOTO', canvasWidth / 2, textY);
+      ctx.fillText('NUVY PHOTO', canvasWidth / 2, textY);
 
-      // 결과 출력
+      // 4. 모달 표시
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
       resultImage.src = dataUrl;
       downloadLink.href = dataUrl;
       resultModal.style.display = 'flex';
-    });
+    }
 
     btnClose.addEventListener('click', () => {
       resultModal.style.display = 'none';
