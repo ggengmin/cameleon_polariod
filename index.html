@@ -42,21 +42,34 @@
       border-radius: 2px;
     }
 
-    /* 원본 비디오는 화면에 보이지 않고, 프레임 소스로만 사용 */
+    /* 카메라 비디오 스트림 (라이브뷰 - 마음에 드셨던 원래 느낌 그대로) */
     video {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    /* 실시간 화면에 실제로 보이는 캔버스 (저장 시 이 함수를 그대로 재사용) */
-    #livePreviewCanvas {
       position: absolute;
       top: 0; left: 0;
       width: 100%;
       height: 100%;
+      object-fit: cover;
+    }
+
+    video.filtered {
+      filter: contrast(125%) saturate(65%) brightness(105%) sepia(5%);
+      transform-origin: center center;
+    }
+
+    /* 직광 플래시 오버레이 */
+    .flash-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+      background: radial-gradient(
+        circle at 50% 45%,
+        rgba(255, 255, 255, 0.45) 0%,
+        rgba(255, 255, 255, 0.1) 55%,
+        rgba(0, 0, 0, 0.15) 100%
+      );
+      mix-blend-mode: screen;
+      opacity: 0.35;
+      z-index: 2;
     }
 
     /* 3-2-1 카운트다운 타이머 오버레이 */
@@ -154,8 +167,8 @@
   <!-- 폴라로이드 프리뷰 -->
   <div class="polaroid-card">
     <div class="viewfinder" id="viewfinder">
-      <video id="webcam" autoplay playsinline muted></video>
-      <canvas id="livePreviewCanvas"></canvas>
+      <video id="webcam" autoplay playsinline muted class="filtered"></video>
+      <div id="flashOverlay" class="flash-overlay"></div>
       <!-- 타이머 표시 레이어 -->
       <div id="timerOverlay" class="timer-overlay">3</div>
     </div>
@@ -181,9 +194,6 @@
 
   <script>
     const video = document.getElementById('webcam');
-    const liveCanvas = document.getElementById('livePreviewCanvas');
-    const liveCtx = liveCanvas.getContext('2d');
-    const viewfinder = document.getElementById('viewfinder');
     const btnShoot = document.getElementById('btnShoot');
     const btnSwitch = document.getElementById('btnSwitch');
     const timerOverlay = document.getElementById('timerOverlay');
@@ -197,80 +207,8 @@
     let stream = null;
     let videoWidth = 0;
     let videoHeight = 0;
-    let rafId = null;
 
     const ZOOM_FACTOR = 1.25;
-    const FILTER_STRING = 'contrast(125%) saturate(65%) brightness(105%) sepia(5%)';
-
-    // 🎯 핵심: 라이브 화면과 저장 사진이 절대 달라지지 않도록,
-    // "화면에 보여줄 정사각형 프레임을 그리는 로직"을 이 함수 하나로 통일합니다.
-    // 라이브 미리보기도, 최종 저장도 전부 이 함수를 그대로 호출합니다.
-    function renderFrame(ctx, size, offsetX = 0, offsetY = 0) {
-      if (!videoWidth || !videoHeight) return;
-
-      ctx.save();
-      ctx.translate(offsetX, offsetY);
-
-      // 1) 필터가 적용된 카메라 프레임
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, size, size);
-      ctx.clip();
-      ctx.filter = FILTER_STRING;
-
-      const baseSize = Math.min(videoWidth, videoHeight);
-      const cropSize = baseSize / ZOOM_FACTOR;
-      const sourceX = (videoWidth - cropSize) / 2;
-      const sourceY = (videoHeight - cropSize) / 2;
-
-      if (currentFacingMode === 'user') {
-        ctx.translate(size, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, 0, 0, size, size);
-      } else {
-        ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, 0, 0, size, size);
-      }
-      ctx.restore();
-
-      // 2) 플래시(중앙 하이라이트) 오버레이 - 필터 없이, 라이브/저장 동일 계산
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, size, size);
-      ctx.clip();
-
-      const gradCenterX = size * 0.5;
-      const gradCenterY = size * 0.45;
-      const gradRadius = size * 0.71;
-      const flashGrad = ctx.createRadialGradient(
-        gradCenterX, gradCenterY, 0,
-        gradCenterX, gradCenterY, gradRadius
-      );
-      flashGrad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
-      flashGrad.addColorStop(0.55, 'rgba(255, 255, 255, 0.1)');
-      flashGrad.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
-
-      ctx.globalCompositeOperation = 'screen';
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = flashGrad;
-      ctx.fillRect(0, 0, size, size);
-      ctx.restore();
-
-      ctx.restore();
-    }
-
-    // 🔴 라이브 프리뷰 루프: 매 프레임 renderFrame()으로 화면을 그림
-    function liveLoop() {
-      const rect = viewfinder.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const targetSize = Math.round(rect.width * dpr);
-      if (liveCanvas.width !== targetSize) {
-        liveCanvas.width = targetSize;
-        liveCanvas.height = targetSize;
-      }
-      liveCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
-      renderFrame(liveCtx, liveCanvas.width);
-      rafId = requestAnimationFrame(liveLoop);
-    }
 
     async function startCamera() {
       if (stream) {
@@ -292,8 +230,10 @@
           videoWidth = video.videoWidth;
           videoHeight = video.videoHeight;
           video.play();
-          if (!rafId) liveLoop(); // 최초 1회만 루프 시작
         };
+
+        const flip = (currentFacingMode === 'user') ? -1 : 1;
+        video.style.transform = `scaleX(${flip}) scale(${ZOOM_FACTOR})`;
 
       } catch (err) {
         alert("카메라 권한을 확인할 수 없습니다. HTTPS 환경인지 확인해 주세요.");
@@ -328,7 +268,47 @@
       }, 1000);
     });
 
-    // 📸 라이브 화면과 완전히 동일한 renderFrame()을 재사용하는 스냅샷 함수
+    // 🎯 CSS filter: contrast(125%) saturate(65%) brightness(105%) sepia(5%) 를
+    // 브라우저의 canvas ctx.filter에 의존하지 않고, 픽셀 단위로 직접 수식 계산.
+    // (모바일 Safari 등에서 ctx.filter가 CSS filter만큼 정확히/안정적으로 지원되지
+    //  않는 경우가 많아서, 라이브뷰와 저장본이 달라지는 원인이 되었음)
+    function applyLiveFilterMath(imageData) {
+      const d = imageData.data;
+
+      const CONTRAST = 1.25;
+      const contrastOffset = 127.5 * (1 - CONTRAST);
+
+      for (let i = 0; i < d.length; i += 4) {
+        let r = d[i], g = d[i + 1], b = d[i + 2];
+
+        // 1. contrast(125%)
+        r = r * CONTRAST + contrastOffset;
+        g = g * CONTRAST + contrastOffset;
+        b = b * CONTRAST + contrastOffset;
+
+        // 2. saturate(65%) - CSS 표준 채도 행렬
+        let sr = 0.72455 * r + 0.25025 * g + 0.0252 * b;
+        let sg = 0.07455 * r + 0.90025 * g + 0.0252 * b;
+        let sb = 0.07455 * r + 0.25025 * g + 0.6752 * b;
+        r = sr; g = sg; b = sb;
+
+        // 3. brightness(105%)
+        r *= 1.05; g *= 1.05; b *= 1.05;
+
+        // 4. sepia(5%) - identity와 세피아 행렬 5% 보간
+        let pr = 0.96965 * r + 0.03845 * g + 0.00945 * b;
+        let pg = 0.01745 * r + 0.9843 * g + 0.0084 * b;
+        let pb = 0.0136 * r + 0.0267 * g + 0.95655 * b;
+
+        d[i]     = pr < 0 ? 0 : pr > 255 ? 255 : pr;
+        d[i + 1] = pg < 0 ? 0 : pg > 255 ? 255 : pg;
+        d[i + 2] = pb < 0 ? 0 : pb > 255 ? 255 : pb;
+      }
+
+      return imageData;
+    }
+
+    // 📸 라이브 화면(비디오+CSS필터) 느낌을 그대로 재현하는 스냅샷 함수
     function takeSnapshot() {
       const ctx = canvas.getContext('2d');
 
@@ -345,21 +325,64 @@
       ctx.fillStyle = '#faf9f6';
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-      // 2. 사진 영역 - 라이브 프리뷰와 동일한 renderFrame() 호출
-      renderFrame(ctx, photoSize, borderWidth, borderWidth);
+      // 2. 사진 영역 - 필터 없이 원본 프레임을 먼저 그림 (ctx.filter 사용 안 함)
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(borderWidth, borderWidth, photoSize, photoSize);
+      ctx.clip();
 
-      // 3. 하단 중앙 브랜드 각인 (NUVY PHOTO) - 더 얇고 고급스러운 서체
+      const baseSize = Math.min(videoWidth, videoHeight);
+      const cropSize = baseSize / ZOOM_FACTOR;
+      const sourceX = (videoWidth - cropSize) / 2;
+      const sourceY = (videoHeight - cropSize) / 2;
+
+      if (currentFacingMode === 'user') {
+        ctx.translate(borderWidth + photoSize, borderWidth);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, 0, 0, photoSize, photoSize);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      } else {
+        ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, borderWidth, borderWidth, photoSize, photoSize);
+      }
+
+      // 3. 방금 그린 사진 영역의 픽셀을 읽어서 직접 필터 수식 적용 (라이브뷰와 동일한 결과)
+      const photoImageData = ctx.getImageData(borderWidth, borderWidth, photoSize, photoSize);
+      applyLiveFilterMath(photoImageData);
+      ctx.putImageData(photoImageData, borderWidth, borderWidth);
+
+      // 4. 라이브 화면의 flash-overlay(중앙 하이라이트 방사형 그라데이션) 동일 반영
+      const gradCenterX = borderWidth + photoSize * 0.5;
+      const gradCenterY = borderWidth + photoSize * 0.45;
+      const gradRadius = photoSize * 0.71;
+      const flashGrad = ctx.createRadialGradient(
+        gradCenterX, gradCenterY, 0,
+        gradCenterX, gradCenterY, gradRadius
+      );
+      flashGrad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
+      flashGrad.addColorStop(0.55, 'rgba(255, 255, 255, 0.1)');
+      flashGrad.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = flashGrad;
+      ctx.fillRect(borderWidth, borderWidth, photoSize, photoSize);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+
+      ctx.restore();
+
+      // 5. 하단 중앙 브랜드 각인 (NUVY PHOTO) - 얇고 고급스러운 서체
       ctx.fillStyle = '#2a2a2a';
       ctx.font = '300 30px "Helvetica Neue", Helvetica, Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       if ('letterSpacing' in ctx) {
-        ctx.letterSpacing = '8px'; // 최신 브라우저(Chrome 등)에서 자간 지원
+        ctx.letterSpacing = '8px';
       }
       const textY = borderWidth + photoSize + (bottomBorderWidth / 2) - 5;
       ctx.fillText('NUVY PHOTO', canvasWidth / 2 + ('letterSpacing' in ctx ? 20 : 0), textY);
 
-      // 4. 모달 표시 - PNG로 저장해서 JPEG 압축으로 인한 채도 손실을 방지
+      // 6. 모달 표시 - PNG로 저장해서 JPEG 압축으로 인한 채도 손실을 방지
       const dataUrl = canvas.toDataURL('image/png');
       resultImage.src = dataUrl;
       downloadLink.href = dataUrl;
