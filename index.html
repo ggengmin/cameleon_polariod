@@ -89,19 +89,19 @@
       user-select: none;
     }
 
-    /* 폴라로이드 하단 브랜드 문구 */
+    /* 폴라로이드 하단 브랜드 문구 - 더 얇고 고급스럽게 */
     .polaroid-caption {
       position: absolute;
-      bottom: 18px;
+      bottom: 20px;
       left: 0;
       width: 100%;
       text-align: center;
-      color: #222;
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 3px;
-      font-family: 'Courier New', Courier, monospace, sans-serif;
-      opacity: 0.85;
+      color: #2a2a2a;
+      font-size: 14px;
+      font-weight: 300;
+      letter-spacing: 5px;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      opacity: 0.75;
     }
 
     /* 컨트롤 버튼 */
@@ -305,18 +305,44 @@
         ctx.translate(borderWidth + photoSize, borderWidth);
         ctx.scale(-1, 1);
         ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, 0, 0, photoSize, photoSize);
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // translate/scale 초기화 (아래 그라데이션은 원좌표계 기준으로 그리기 위해)
       } else {
         ctx.drawImage(video, sourceX, sourceY, cropSize, cropSize, borderWidth, borderWidth, photoSize, photoSize);
       }
+
+      // ✨ 라이브 화면의 flash-overlay(중앙 하이라이트 방사형 그라데이션)를 캡처에도 동일하게 반영
+      ctx.filter = 'none';
+      const gradCenterX = borderWidth + photoSize * 0.5;
+      const gradCenterY = borderWidth + photoSize * 0.45;
+      const gradRadius = photoSize * 0.71;
+      const flashGrad = ctx.createRadialGradient(
+        gradCenterX, gradCenterY, 0,
+        gradCenterX, gradCenterY, gradRadius
+      );
+      flashGrad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
+      flashGrad.addColorStop(0.55, 'rgba(255, 255, 255, 0.1)');
+      flashGrad.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = flashGrad;
+      ctx.fillRect(borderWidth, borderWidth, photoSize, photoSize);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+
       ctx.restore();
 
-      // 3. 하단 중앙 브랜드 각인 (NUVY PHOTO)
-      ctx.fillStyle = '#222222';
-      ctx.font = '600 28px "Courier New", Courier, monospace, sans-serif';
+      // 3. 하단 중앙 브랜드 각인 (NUVY PHOTO) - 더 얇고 고급스러운 서체
+      ctx.fillStyle = '#2a2a2a';
+      ctx.font = '300 30px "Helvetica Neue", Helvetica, Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+      if ('letterSpacing' in ctx) {
+        ctx.letterSpacing = '8px'; // 최신 브라우저(Chrome 등)에서 자간 지원
+      }
       const textY = borderWidth + photoSize + (bottomBorderWidth / 2) - 5;
-      ctx.fillText('NUVY PHOTO', canvasWidth / 2, textY);
+      // letterSpacing 미지원 브라우저 대비, 살짝 오프셋 보정
+      ctx.fillText('NUVY PHOTO', canvasWidth / 2 + ('letterSpacing' in ctx ? 20 : 0), textY);
 
       // 4. 모달 표시
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
