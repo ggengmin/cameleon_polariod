@@ -2,12 +2,12 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>iPad Polaroid Cam</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Flash Polaroid Cam (Fixed)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: #121212;
+      background-color: #1a1a1a;
       color: #fff;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
@@ -15,92 +15,105 @@
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      padding: 20px;
+      padding: 10px;
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
-    h1 { font-size: 20px; margin-bottom: 15px; color: #eee; }
+    h1 { font-size: 18px; margin-bottom: 10px; color: #eee; }
 
-    /* 폴라로이드 실시간 라이브 카메라는 화면 중앙 배치 */
+    /* 폴라로이드 카드 스타일 */
     .polaroid-card {
-      background: #f8f7f5;
-      padding: 16px 16px 55px 16px;
+      background: #fdfdfc; /* 밝은 크림색 */
+      padding: 12px 12px 45px 12px;
       border-radius: 4px;
-      box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
       width: 100%;
-      max-width: 380px;
+      max-width: 350px;
       position: relative;
     }
 
+    /* 뷰파인더 (정사각형 영역) */
     .viewfinder {
       position: relative;
       width: 100%;
-      height: 380px;
+      /* 정사각형 유지를 위한 hack */
+      padding-top: 100%; 
       background-color: #000;
       overflow: hidden;
       border-radius: 2px;
     }
 
-    /* 카메라 실시간 스트림 */
+    /* 카메라 비디오 스트림 */
     video {
+      position: absolute;
+      top: 0; left: 0;
       width: 100%;
       height: 100%;
-      object-fit: cover;
-      transform: scaleX(-1); /* 셀카 반전 */
+      /* 비율 왜곡 없이 꽉 차게 (중앙 맞춤) */
+      object-fit: cover; 
+      /* 전면 카메라일 경우 좌우 반전은 JS에서 처리 */
     }
 
-    /* 뽀얀 플래시 오버레이 (실시간 화면용) */
+    /* --- [해결 1: 프리뷰 필터 적용 확인 및 조정] --- */
+    /* 비디오에 직접 CSS 필터 적용 */
+    video.filtered {
+      /* 대비(Contrast)를 125%로 주었을 때 너무 뿌옇다면, brightness를 살짝 낮춰 밸런스를 맞춥니다. */
+      filter: contrast(125%) saturate(65%) brightness(105%) sepia(5%);
+    }
+
+    /* 프리뷰용 플래시/블룸 오버레이 (뿌연 느낌 감소) */
     .flash-overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
       pointer-events: none;
       background: radial-gradient(
         circle at 50% 40%, 
-        rgba(255, 255, 255, 0.5) 0%, 
-        rgba(255, 255, 255, 0.15) 50%, 
-        transparent 90%
+        rgba(255, 255, 255, 0.4) 0%, /* 중앙 밝기 감소 */
+        rgba(255, 255, 255, 0.05) 60%, 
+        transparent 95%
       );
       mix-blend-mode: screen;
-      opacity: 0.3; /* 뽀얀효과 30% */
+      /* 뽀얀 효과 30%를 불투명도로 조절 */
+      opacity: 0.3; 
+      z-index: 2;
     }
 
-    /* 버튼 컨트롤 영역 */
+    /* 컨트롤 버튼 */
     .controls {
-      margin-top: 25px;
+      margin-top: 20px;
       display: flex;
-      gap: 15px;
+      gap: 12px;
     }
 
     .btn {
-      padding: 14px 28px;
-      font-size: 16px;
+      padding: 12px 24px;
+      font-size: 15px;
       font-weight: 600;
       border: none;
-      border-radius: 30px;
+      border-radius: 25px;
       cursor: pointer;
       transition: all 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
     }
 
     .btn-shoot {
       background: #ff4757;
       color: white;
-      box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+      box-shadow: 0 4px 10px rgba(255, 71, 87, 0.3);
     }
-    .btn-shoot:active { transform: scale(0.95); }
+    .btn-shoot:active { transform: scale(0.96); }
 
     .btn-switch {
       background: #333;
       color: #ddd;
     }
 
-    /* 렌더링용 숨김 캔버스 */
-    canvas { display: none; }
-
-    /* 찍은 결과물 모달 popup */
+    /* 결과 모달 (저장 팝업) */
     .result-modal {
       display: none;
       position: fixed;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.85);
+      background: rgba(0,0,0,0.9);
       z-index: 100;
       flex-direction: column;
       align-items: center;
@@ -110,47 +123,51 @@
     .result-modal img {
       max-width: 90%;
       max-height: 70vh;
-      border-radius: 4px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      border-radius: 2px;
       margin-bottom: 20px;
     }
     .result-modal .btn-group {
       display: flex;
-      gap: 12px;
+      gap: 10px;
     }
+
+    /* 합성용 캔버스 (숨김) */
+    canvas#saveCanvas { display: none; }
   </style>
 </head>
 <body>
 
-  <h1>iPad Flash Polaroid Cam</h1>
+  <h1>Flash Polaroid Cam</h1>
 
-  <!-- 폴라로이드 실시간 뷰파인더 -->
+  <!-- 폴라로이드 프리뷰 -->
   <div class="polaroid-card">
     <div class="viewfinder">
-      <video id="webcam" autoplay playsinline muted></video>
+      <!-- .filtered 클래스로 CSS 필터 적용 확인 -->
+      <video id="webcam" autoplay playsinline muted class="filtered"></video>
       <div id="flashOverlay" class="flash-overlay"></div>
     </div>
   </div>
 
   <div class="controls">
     <button class="btn btn-switch" id="btnSwitch">카메라 전환</button>
-    <button class="btn btn-shoot" id="btnShoot">📸 사진 촬영</button>
+    <button class="btn btn-shoot" id="btnShoot">📸 촬영</button>
   </div>
 
-  <!-- 숨겨진 오프스크린 캔버스 (합성/저장 전용) -->
+  <!-- 합성 및 저장용 캔버스 -->
   <canvas id="saveCanvas"></canvas>
 
-  <!-- 촬영 후 저장 모달 -->
+  <!-- 저장 모달 -->
   <div class="result-modal" id="resultModal">
     <img id="resultImage" alt="Polaroid Result">
     <div class="btn-group">
-      <a id="downloadLink" class="btn btn-shoot" download="polaroid-flash.jpg">사진 저장하기</a>
-      <button class="btn btn-switch" id="btnClose">다시 찍기</button>
+      <a id="downloadLink" class="btn btn-shoot" download="polaroid-pic.jpg">저장</a>
+      <button class="btn btn-switch" id="btnClose">닫기</button>
     </div>
   </div>
 
   <script>
     const video = document.getElementById('webcam');
+    const flashOverlay = document.getElementById('flashOverlay');
     const btnShoot = document.getElementById('btnShoot');
     const btnSwitch = document.getElementById('btnSwitch');
     const canvas = document.getElementById('saveCanvas');
@@ -159,111 +176,138 @@
     const downloadLink = document.getElementById('downloadLink');
     const btnClose = document.getElementById('btnClose');
 
-    let currentFacingMode = 'user'; // 'user' (전면 셀카) 또는 'environment' (후면)
+    let currentFacingMode = 'user'; // 'user' (전면), 'environment' (후면)
     let stream = null;
+    let videoWidth = 0;
+    let videoHeight = 0;
 
-    // 1. 요청하신 지정 필터 옵션값
+    // --- [해결 1: 선명도 조정을 위한 필터값 미세조정] ---
+    // 전체적으로 '뿌연' 느낌을 줄이기 위해 대비를 유지하되 블룸 효과를 낮춤
     const FILTER_CONFIG = {
-      contrast: 1.25,   // 명암대비 125%
-      saturate: 0.65,   // 채도 65%
-      brightness: 1.15, // 플래시 기본 밝기 보정 115%
-      bloomOpacity: 0.30 // 뽀얀 효과 30%
+      contrast: 1.25,      // 대비 125% (유지)
+      saturate: 0.65,      // 채도 65% (유지)
+      brightness: 1.05,    // 프리뷰 밝기 보정 (살짝 낮춤)
+      saveBrightness: 1.15,// 저장시 플래시 밝기 (유지)
+      bloomOpacity: 0.15   // 뽀얀 효과 (프리뷰) (30% -> 15%로 감소하여 뿌연 느낌 줄임)
     };
 
-    // 실시간 비디오 화면에 CSS 필터 적용
-    video.style.filter = `contrast(${FILTER_CONFIG.contrast * 100}%) saturate(${FILTER_CONFIG.saturate * 100}%) brightness(${FILTER_CONFIG.brightness * 100}%)`;
+    // 프리뷰 블룸 오버레이 투명도 적용
+    flashOverlay.style.opacity = FILTER_CONFIG.bloomOpacity;
 
-    // 2. 아이패드 카메라 스트림 연결
     async function startCamera() {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        // 아이패드에서 정사각형에 가까운 높은 해상도 요청
+        const constraints = {
           video: {
             facingMode: currentFacingMode,
-            width: { ideal: 1080 },
-            height: { ideal: 1080 }
+            width: { ideal: 1440 },
+            height: { ideal: 1440 },
+            aspectRatio: 1 // 정사각형 권장
           },
           audio: false
-        });
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
+
+        // 비디오의 실제 원본 크기 가져오기 (왜곡 해결에 필요)
+        video.onloadedmetadata = () => {
+          videoWidth = video.videoWidth;
+          videoHeight = video.videoHeight;
+          video.play();
+        };
+
+        // 전면 카메라일 경우 프리뷰 좌우 반전
+        video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
+
       } catch (err) {
-        alert("카메라 권한을 허용해주세요: " + err.message);
+        console.error("Camera error:", err);
+        alert("카메라를 켤 수 없습니다. HTTPS 환경인지 확인해주세요.");
       }
     }
 
-    // 전면/후면 카메라 전환
     btnSwitch.addEventListener('click', () => {
       currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
-      video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
       startCamera();
     });
 
-    // 3. 📸 셔터 클릭시 캔버스에 폴라로이드 + 필터 + 뽀얀 글로우 렌더링
+    // --- [해결 2: 가로/세로 촬영 왜곡 없는 중앙 자르기(Crop) 로직] ---
     btnShoot.addEventListener('click', () => {
       const ctx = canvas.getContext('2d');
 
-      // 고화질 폴라로이드 캔버스 크기 정의
-      const pWidth = 800;
-      const pHeight = 1000;
-      const border = 40;
-      const bottomBorder = 150;
+      // 저장용 고화질 캔버스 크기 (정사각형 사진 영역 기준)
+      const photoSize = 1000;
+      const borderWidth = 40;
+      const bottomBorderWidth = 150;
+      const canvasWidth = photoSize + (borderWidth * 2);
+      const canvasHeight = photoSize + borderWidth + bottomBorderWidth;
 
-      canvas.width = pWidth;
-      canvas.height = pHeight;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
 
-      // A. 폴라로이드 흰색 프레임 바탕
-      ctx.fillStyle = '#f8f7f5';
-      ctx.fillRect(0, 0, pWidth, pHeight);
+      // 1. 흰색 프레임 그리기
+      ctx.fillStyle = '#fdfdfc';
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-      // B. 사진 영역 계산
-      const photoX = border;
-      const photoY = border;
-      const photoW = pWidth - (border * 2);
-      const photoH = pHeight - border - bottomBorder;
-
+      // 2. 사진 영역 클리핑 (합성 영역 지정)
       ctx.save();
-      // 사진 영역으로 클리핑
       ctx.beginPath();
-      ctx.rect(photoX, photoY, photoW, photoH);
+      ctx.rect(borderWidth, borderWidth, photoSize, photoSize);
       ctx.clip();
 
-      // C. 캔버스 이미지 필터 적용 (명암대비 125%, 채도 65%)
-      ctx.filter = `contrast(${FILTER_CONFIG.contrast * 100}%) saturate(${FILTER_CONFIG.saturate * 100}%) brightness(${FILTER_CONFIG.brightness * 100}%)`;
+      // 3. 캔버스 필터 적용 (명암대비 125%, 채도 65%)
+      ctx.filter = `contrast(${FILTER_CONFIG.contrast * 100}%) saturate(${FILTER_CONFIG.saturate * 100}%) brightness(${FILTER_CONFIG.saveBrightness * 100}%) sepia(5%)`;
 
-      // 셀카일 경우 좌우 반전 처리
-      if (currentFacingMode === 'user') {
-        ctx.translate(photoX + photoW, photoY);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, 0, 0, photoW, photoH);
+      // 4. 중앙 자르기(Crop) 및 렌더링 로직 (왜곡 해결 핵심)
+      let sourceX, sourceY, sourceSize;
+      
+      if (videoWidth > videoHeight) {
+        // 가로로 긴 영상 (Landscape)
+        sourceSize = videoHeight; // 짧은 쪽 기준
+        sourceX = (videoWidth - videoHeight) / 2; // 중앙 맞춤
+        sourceY = 0;
       } else {
-        ctx.drawImage(video, photoX, photoY, photoW, photoH);
+        // 세로로 긴 영상 (Portrait)
+        sourceSize = videoWidth; // 짧은 쪽 기준
+        sourceX = 0;
+        sourceY = (videoHeight - videoWidth) / 2; // 중앙 맞춤
+      }
+
+      // 전면 카메라 좌우 반전 처리
+      if (currentFacingMode === 'user') {
+        ctx.translate(borderWidth + photoSize, borderWidth);
+        ctx.scale(-1, 1);
+        // 중앙 자르기(sx, sy, sw, sh) 후 캔버스 영역(dx, dy, dw, dh)에 그리기
+        ctx.drawImage(video, sourceX, sourceY, sourceSize, sourceSize, 0, 0, photoSize, photoSize);
+      } else {
+        ctx.drawImage(video, sourceX, sourceY, sourceSize, sourceSize, borderWidth, borderWidth, photoSize, photoSize);
       }
       ctx.restore();
 
-      // D. 뽀얀 효과 (Bloom 30%) 정면 플래시 Radial Gradient 합성
+      // 5. 플래시 뽀얀 효과 합성 (선명도를 위해 불투명도 조절)
       ctx.save();
       ctx.beginPath();
-      ctx.rect(photoX, photoY, photoW, photoH);
+      ctx.rect(borderWidth, borderWidth, photoSize, photoSize);
       ctx.clip();
 
-      const centerX = photoX + (photoW / 2);
-      const centerY = photoY + (photoH * 0.4);
-      const radius = Math.max(photoW, photoH) * 0.75;
+      const centerX = borderWidth + (photoSize / 2);
+      const centerY = borderWidth + (photoSize * 0.4);
+      const radius = photoSize * 0.7;
 
       const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-      grad.addColorStop(0, `rgba(255, 255, 255, ${FILTER_CONFIG.bloomOpacity * 1.5})`);
-      grad.addColorStop(0.5, `rgba(255, 250, 240, ${FILTER_CONFIG.bloomOpacity * 0.5})`);
+      grad.addColorStop(0, `rgba(255, 255, 255, 0.5)`); // 중앙 밝기 감소
+      grad.addColorStop(0.6, `rgba(255, 250, 240, 0.1)`);
       grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
-      ctx.globalCompositeOperation = 'screen'; // 스크린 혼합 모드
+      ctx.globalCompositeOperation = 'screen';
       ctx.fillStyle = grad;
-      ctx.fillRect(photoX, photoY, photoW, photoH);
+      ctx.fillRect(borderWidth, borderWidth, photoSize, photoSize);
       ctx.restore();
 
-      // E. 완성이미지 추출 및 저장 팝업 표시
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      // 6. 완성이미지 모달 표시
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       resultImage.src = dataUrl;
       downloadLink.href = dataUrl;
       resultModal.style.display = 'flex';
