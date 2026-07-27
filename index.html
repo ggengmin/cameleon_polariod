@@ -159,16 +159,6 @@
     }
 
     canvas#saveCanvas { display: none; }
-
-    /* 📸 촬영 직전 화면 전체가 하얗게 번쩍이는 가짜 플래시 */
-    #screenFlash {
-      position: fixed;
-      inset: 0;
-      background: #ffffff;
-      opacity: 0;
-      pointer-events: none;
-      z-index: 9999;
-    }
   </style>
 </head>
 <body>
@@ -193,7 +183,6 @@
   </div>
 
   <canvas id="saveCanvas"></canvas>
-  <div id="screenFlash"></div>
 
   <!-- 저장 모달 -->
   <div class="result-modal" id="resultModal">
@@ -214,7 +203,6 @@
     const resultImage = document.getElementById('resultImage');
     const downloadLink = document.getElementById('downloadLink');
     const btnClose = document.getElementById('btnClose');
-    const screenFlash = document.getElementById('screenFlash');
 
     let currentFacingMode = 'user';
     let stream = null;
@@ -274,24 +262,12 @@
         } else {
           clearInterval(countdown);
           timerOverlay.style.display = 'none';
-          triggerFlashAndCapture(); // 화면 번쩍 + 그 순간 촬영
+          takeSnapshot(); // 타이머 끝나면 바로 캡처!
           btnShoot.disabled = false;
           btnSwitch.disabled = false;
         }
       }, 1000);
     });
-
-    // 💡 화면을 하얗게 확 밝힌 뒤(진짜 조명 역할도 살짝 함), 가장 밝은 순간 촬영하고 다시 사라짐
-    function triggerFlashAndCapture() {
-      screenFlash.style.transition = 'opacity 60ms ease-out';
-      screenFlash.style.opacity = '1';
-
-      setTimeout(() => {
-        takeSnapshot();
-        screenFlash.style.transition = 'opacity 350ms ease-in';
-        screenFlash.style.opacity = '0';
-      }, 120); // 화면이 하얗게 유지되는 짧은 시간 (이 순간 사진이 찍힘)
-    }
 
     // 🎯 CSS filter: contrast(140%) saturate(50%) brightness(105%) sepia(10%) 를
     // canvas의 ctx.filter에 의존하지 않고, 픽셀 단위로 직접 수식 계산해서 적용합니다.
